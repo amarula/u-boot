@@ -358,6 +358,7 @@
 
 #define ENABLE_HUSH_INTERACTIVE 1
 #define ENABLE_FEATURE_EDITING 1
+#define ENABLE_HUSH_IF 1
 #define CONFIG_SYS_PROMPT "2021> "
 #else /* !__U_BOOT__ */
 #if !(defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) \
@@ -1583,8 +1584,8 @@ static void xxfree(void *ptr)
 #if HUSH_DEBUG < 2
 #ifndef __U_BOOT__
 # define msg_and_die_if_script(lineno, ...)     msg_and_die_if_script(__VA_ARGS__)
-# define syntax_error(lineno, msg)              syntax_error(msg)
 #endif /* !__U_BOOT__ */
+# define syntax_error(lineno, msg)              syntax_error(msg)
 # define syntax_error_at(lineno, msg)           syntax_error_at(msg)
 # define syntax_error_unterm_ch(lineno, ch)     syntax_error_unterm_ch(ch)
 # define syntax_error_unterm_str(lineno, s)     syntax_error_unterm_str(s)
@@ -1827,6 +1828,11 @@ char* FAST_FUNC skip_non_whitespace(const char *s)
 		s++;
 
 	return (char *) s;
+}
+
+void* FAST_FUNC xmemdup(const void *s, int n)
+{
+	return memcpy(xmalloc(n), s, n);
 }
 
 #define xstrdup strdup
@@ -4294,7 +4300,6 @@ static void debug_print_tree(struct pipe *pi, int lvl)
 		[PIPE_OR ] = "OR" ,
 		[PIPE_BG ] = "BG" ,
 	};
-#ifndef __U_BOOT__
 	static const char *RES[] = {
 		[RES_NONE ] = "NONE" ,
 # if ENABLE_HUSH_IF
@@ -4324,7 +4329,6 @@ static void debug_print_tree(struct pipe *pi, int lvl)
 		[RES_XXXX ] = "XXXX" ,
 		[RES_SNTX ] = "SNTX" ,
 	};
-#endif /* !__U_BOOT__ */
 	static const char *const CMDTYPE[] = {
 		"{}",
 		"()",
@@ -4341,15 +4345,13 @@ static void debug_print_tree(struct pipe *pi, int lvl)
 #ifndef __U_BOOT__
 		fdprintf(2, "%*spipe %d #cmds:%d %sres_word=%s followup=%d %s\n",
 #else /* __U_BOOT__ */
-		printf("%*spipe %d #cmds:%d followup=%d %s\n",
+		printf("%*spipe %d #cmds:%d %sres_word=%s followup=%d %s\n",
 #endif /* __U_BOOT__ */
 				lvl*2, "",
 				pin,
 				pi->num_cmds,
-#ifdef __U_BOOT__
 				(IF_HAS_KEYWORDS(pi->pi_inverted ? "! " :) ""),
 				RES[pi->res_word],
-#endif /* !__U_BOOT__ */
 				pi->followup, PIPE[pi->followup]
 		);
 		prn = 0;
@@ -4626,7 +4628,11 @@ static const struct reserved_combo* match_reserved_word(o_string *word)
 	 * to turn the compound list into a command.
 	 * FLAG_START means the word must start a new compound list.
 	 */
+#ifndef __U_BOOT__
 	static const struct reserved_combo reserved_list[] ALIGN4 = {
+#else /* __U_BOOT__ */
+	static const struct reserved_combo reserved_list[] __aligned(4) = {
+#endif /* __U_BOOT__ */
 # if ENABLE_HUSH_IF
 		{ "!",     RES_NONE,  NOT_ASSIGNMENT  , 0 },
 		{ "if",    RES_IF,    MAYBE_ASSIGNMENT, FLAG_THEN | FLAG_START },
@@ -4682,7 +4688,12 @@ static const struct reserved_combo* reserved_word(struct parse_context *ctx)
 # endif
 	if (r->flag == 0) { /* '!' */
 		if (ctx->ctx_inverted) { /* bash doesn't accept '! ! true' */
+#ifndef __U_BOOT__
 			syntax_error("! ! command");
+#else /* __U_BOOT__ */
+			printf("Double inversion (\"%s\") is not supported\n",
+				ctx->as_string.data);
+#endif /* __U_BOOT__ */
 			ctx->ctx_res_w = RES_SNTX;
 		}
 		ctx->ctx_inverted = 1;
@@ -10184,6 +10195,7 @@ static noinline int run_pipe(struct pipe *pi)
 		rcode = 1; /* exitcode if redir failed */
 #ifndef __U_BOOT__
 		if (setup_redirects(command, &squirrel) == 0) {
+#endif /* !__U_BOOT__ */
 			debug_printf_exec(": run_list\n");
 //FIXME: we need to pass squirrel down into run_list()
 //for SH_STANDALONE case, or else this construct:
@@ -10192,10 +10204,11 @@ static noinline int run_pipe(struct pipe *pi)
 //and in SH_STANDALONE mode, "find" is not execed,
 //therefore CLOEXEC on saved fd does not help.
 			rcode = run_list(command->group) & 0xff;
+#ifndef __U_BOOT__
 		}
 		restore_redirects(squirrel);
-		IF_HAS_KEYWORDS(if (pi->pi_inverted) rcode = !rcode;)
 #endif /* !__U_BOOT__ */
+		IF_HAS_KEYWORDS(if (pi->pi_inverted) rcode = !rcode;)
 		debug_leave();
 		debug_printf_exec("run_pipe: return %d\n", rcode);
 		return rcode;
@@ -10710,12 +10723,12 @@ static int run_list(struct pipe *pi)
 			break;
 		if (G_flag_return_in_progress == 1)
 			break;
+#endif /* !__U_BOOT__ */
 
 		IF_HAS_KEYWORDS(rword = pi->res_word;)
 		debug_printf_exec(": rword=%d cond_code=%d last_rword=%d\n",
 				rword, cond_code, last_rword);
 
-#endif /* !__U_BOOT__ */
 		sv_errexit_depth = G.errexit_depth;
 		if (
 #if ENABLE_HUSH_IF
@@ -10752,7 +10765,11 @@ static int run_list(struct pipe *pi)
 		if (cond_code) {
 			if (rword == RES_THEN) {
 				/* if false; then ... fi has exitcode 0! */
+#ifndef __U_BOOT__
 				G.last_exitcode = rcode = EXIT_SUCCESS;
+#else /* __U_BOOT__ */
+				G.last_exitcode = rcode = 0;
+#endif /* __U_BOOT__ */
 				/* "if <false> THEN cmd": skip cmd */
 				continue;
 			}
