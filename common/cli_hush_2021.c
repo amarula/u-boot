@@ -359,6 +359,7 @@
 #define ENABLE_HUSH_INTERACTIVE 1
 #define ENABLE_FEATURE_EDITING 1
 #define ENABLE_HUSH_IF 1
+#define ENABLE_HUSH_LOOPS 1
 #define CONFIG_SYS_PROMPT "2021> "
 #else /* !__U_BOOT__ */
 #if !(defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) \
@@ -4945,7 +4946,11 @@ static int done_word(struct parse_context *ctx)
 		 || endofname(command->argv[0])[0] != '\0'
 		) {
 			/* bash says just "not a valid identifier" */
+#ifndef __U_BOOT__
 			syntax_error("bad variable name in for");
+#else /* __U_BOOT__ */
+			printf("bad variable name (%s) in for", command->argv[0]);
+#endif /* __U_BOOT__ */
 			return 1;
 		}
 		/* Force FOR to have just one word (variable name) */
@@ -10673,7 +10678,11 @@ static int run_list(struct pipe *pi)
 				continue;
 			/* current word is FOR or IN (BOLD in comments below) */
 			if (cpipe->next == NULL) {
+#ifndef __U_BOOT__
 				syntax_error("malformed for");
+#else /* __U_BOOT__ */
+				printf("malformed for\n");
+#endif /* __U_BOOT__ */
 				debug_leave();
 				debug_printf_exec("run_list lvl %d return 1\n", G.run_list_level);
 				return 1;
@@ -10685,7 +10694,11 @@ static int run_list(struct pipe *pi)
 			if (cpipe->res_word == RES_IN /* "for v IN a b; not_do..."? */
 			 || cpipe->next->res_word != RES_IN /* FOR v not_do_and_not_in..."? */
 			) {
+#ifndef __U_BOOT__
 				syntax_error("malformed for");
+#else /* __U_BOOT__ */
+				printf("Malformed for!\n");
+#endif /* __U_BOOT__ */
 				debug_leave();
 				debug_printf_exec("run_list lvl %d return 1\n", G.run_list_level);
 				return 1;
@@ -10713,7 +10726,7 @@ static int run_list(struct pipe *pi)
 #ifndef __U_BOOT__
 	for (; pi; pi = IF_HUSH_LOOPS(rword == RES_DONE ? loop_top : ) pi->next) {
 #else /* __U_BOOT__ */
-	for (; pi; pi = pi->next) {
+	for (; pi; pi = rword == RES_DONE ? loop_top : pi->next) {
 #endif /* __U_BOOT__ */
 		int r;
 		int sv_errexit_depth;
@@ -10786,7 +10799,11 @@ static int run_list(struct pipe *pi)
 			if (!for_lcur) {
 				/* first loop through for */
 
+#ifndef __U_BOOT__
 				static const char encoded_dollar_at[] ALIGN1 = {
+#else /* __U_BOOT__ */
+				static const char encoded_dollar_at[] __aligned(1) = {
+#endif /* __U_BOOT__*/
 					SPECIAL_VAR_SYMBOL, '@' | 0x80, SPECIAL_VAR_SYMBOL, '\0'
 				}; /* encoded representation of "$@" */
 				static const char *const encoded_dollar_at_argv[] = {
@@ -10794,7 +10811,11 @@ static int run_list(struct pipe *pi)
 				}; /* argv list with one element: "$@" */
 				char **vals;
 
+#ifndef __U_BOOT__
 				G.last_exitcode = rcode = EXIT_SUCCESS;
+#else /* __U_BOOT__ */
+				G.last_exitcode = rcode = 0;
+#endif /* __U_BOOT__ */
 				vals = (char**)encoded_dollar_at_argv;
 				if (pi->next->res_word == RES_IN) {
 					/* if no variable values after "in" we skip "for" */
@@ -10819,7 +10840,20 @@ static int run_list(struct pipe *pi)
 			}
 			/* Insert next value from for_lcur */
 			/* note: *for_lcur already has quotes removed, $var expanded, etc */
+#ifndef __U_BOOT__
 			set_local_var(xasprintf("%s=%s", pi->cmds[0].argv[0], *for_lcur++), /*flag:*/ 0);
+#else /* __U_BOOT__ */
+			/* We cannot use xasprintf, so we emulate it. */
+			char *full_var;
+			char *var = pi->cmds[0].argv[0];
+			char *val = *for_lcur++;
+
+			/* + 1 to take into account =. */
+			full_var = xmalloc(strlen(var) + strlen(val) + 1);
+			sprintf(full_var, "%s=%s", var, val);
+
+			set_local_var(full_var, /*flag:*/ 0);
+#endif /* __U_BOOT__ */
 			continue;
 		}
 		if (rword == RES_IN) {
@@ -11011,7 +11045,11 @@ static int run_list(struct pipe *pi)
 			if (rword == RES_WHILE) {
 				if (rcode) {
 					/* "while false; do...done" - exitcode 0 */
+#ifndef __U_BOOT__
 					G.last_exitcode = rcode = EXIT_SUCCESS;
+#else /* __U_BOOT__ */
+					G.last_exitcode = rcode = 0;
+#endif /* __U_BOOT__ */
 					debug_printf_exec(": while expr is false: breaking (exitcode:EXIT_SUCCESS)\n");
 					break;
 				}
